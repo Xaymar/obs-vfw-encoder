@@ -5,7 +5,9 @@
 #include <vector>
 #include <map>
 
-std::map<std::string, VFW::Info> _IdToInfo;
+std::map<std::string, VFW::Info*> _IdToInfo;
+
+#define snprintf sprintf_s
 
 bool VFW::Initialize() {
 	// Initialize all VFW Encoders (we can only use one anyway)
@@ -24,33 +26,33 @@ bool VFW::Initialize() {
 				snprintf(nameBuf.data(), nameBuf.size(), "%ls (" PLUGIN_NAME ")", icinfo.szDescription);
 
 				// Track
-				VFW::Info info;
-				info.Id = std::string(idBuf.data());
-				info.Name = std::string(nameBuf.data());
-				info.icInfo = icinfo;
+				VFW::Info* info = new VFW::Info();
+				info->Id = std::string(idBuf.data());
+				info->Name = std::string(nameBuf.data());
+				info->icInfo = icinfo;
 
 				// Register
-				std::memset(&info.obsInfo, 0, sizeof(obs_encoder_info));
-				info.obsInfo.id = info.Id.data();
-				info.obsInfo.type = OBS_ENCODER_VIDEO;
-				info.obsInfo.codec = "vidc";
-				info.obsInfo.type_data = &info; // circular reference but whatever, it's not reference counted
-				info.obsInfo.get_name = VFW::Encoder::get_name;
-				info.obsInfo.create = VFW::Encoder::create;
-				info.obsInfo.destroy = VFW::Encoder::destroy;
-				info.obsInfo.encode = VFW::Encoder::encode;
-				info.obsInfo.get_properties = VFW::Encoder::get_properties;
-				info.obsInfo.update = VFW::Encoder::update;
-				info.obsInfo.get_extra_data = VFW::Encoder::get_extra_data;
-				info.obsInfo.get_sei_data = VFW::Encoder::get_sei_data;
-				info.obsInfo.get_video_info = VFW::Encoder::get_video_info;
+				std::memset(&info->obsInfo, 0, sizeof(obs_encoder_info));
+				info->obsInfo.id = info->Id.data();
+				info->obsInfo.type = OBS_ENCODER_VIDEO;
+				info->obsInfo.codec = "vidc";
+				info->obsInfo.type_data = info; // circular reference but whatever, it's not reference counted
+				info->obsInfo.get_name = VFW::Encoder::get_name;
+				info->obsInfo.create = VFW::Encoder::create;
+				info->obsInfo.destroy = VFW::Encoder::destroy;
+				info->obsInfo.encode = VFW::Encoder::encode;
+				info->obsInfo.get_properties = VFW::Encoder::get_properties;
+				info->obsInfo.update = VFW::Encoder::update;
+				info->obsInfo.get_extra_data = VFW::Encoder::get_extra_data;
+				info->obsInfo.get_sei_data = VFW::Encoder::get_sei_data;
+				info->obsInfo.get_video_info = VFW::Encoder::get_video_info;
 
-				PLOG_INFO("%s %s",
-					info.Id.data(),
-					info.Name.data());
+				PLOG_INFO("Registering: %s %s",
+					info->Id.data(),
+					info->Name.data());
 
-				obs_register_encoder(&info.obsInfo);
-				_IdToInfo.insert(std::make_pair(info.Id, info));
+				obs_register_encoder(&info->obsInfo);
+				_IdToInfo.insert(std::make_pair(info->Id, info));
 			}
 			ICClose(hIC);
 		}
@@ -95,14 +97,27 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 	return false;
 }
 
-obs_properties_t* VFW::Encoder::get_properties(void *data) {
-	return static_cast<VFW::Encoder*>(data)->get_properties();
-}
+obs_properties_t* VFW::Encoder::get_properties(void *type_data, void *data) {
+	VFW::Info* info = static_cast<VFW::Info*>(type_data);
 
-obs_properties_t* VFW::Encoder::get_properties() {
 	obs_properties_t* pr = obs_properties_create();
+	obs_property_t* p;
+
+	p = obs_properties_add_int(pr, PROP_BITRATE, "Bitrate", 1, 1000000, 1);
+	p = obs_properties_add_float(pr, PROP_QUALITY, "Quality", 1, 100, 0.01);
+	p = obs_properties_add_float(pr, PROP_KEYFRAME_INTERVAL, "Keyframe Interval", 0.01, 30.00, 0.01);
+	p = obs_properties_add_button(pr, PROP_CONFIGURE, "Configure", cb_configure);
+	p = obs_properties_add_button(pr, PROP_ABOUT, "Configure", cb_about);
 
 	return pr;
+}
+
+bool VFW::Encoder::cb_configure(obs_properties_t *pr, obs_property_t *p, void *data) {
+	return false;
+}
+
+bool VFW::Encoder::cb_about(obs_properties_t *pr, obs_property_t *p, void *data) {
+	return false;
 }
 
 bool VFW::Encoder::update(void *data, obs_data_t *settings) {

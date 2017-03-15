@@ -23,8 +23,16 @@
 #include "Version.h"
 
 // Logging
-#define PLOG(level, ...)	blog(level, __VA_ARGS__);
+#define PLOG(level, ...)	blog(level, "[VFW] " __VA_ARGS__);
 #define PLOG_ERROR(...)		PLOG(LOG_ERROR,   __VA_ARGS__)
 #define PLOG_WARNING(...)	PLOG(LOG_WARNING, __VA_ARGS__)
 #define PLOG_INFO(...)		PLOG(LOG_INFO,    __VA_ARGS__)
 #define PLOG_DEBUG(...)		PLOG(LOG_DEBUG,   __VA_ARGS__)
+
+// Properties
+#define PROP_BITRATE			"Bitrate"
+#define PROP_QUALITY			"Quality"
+#define PROP_KEYFRAME_INTERVAL	"KeyframeInterval"
+
+#define PROP_CONFIGURE			"Configure"
+#define PROP_ABOUT				"About"

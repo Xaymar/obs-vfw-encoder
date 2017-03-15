@@ -8,14 +8,14 @@ SET(enc-vfw_VERSION_MAJOR 0)
 SET(enc-vfw_VERSION_MINOR 1)
 SET(enc-vfw_VERSION_PATCH 0)
 SET(enc-vfw_VERSION_BUILD 0)
-configure_file(
-	"${PROJECT_SOURCE_DIR}/#Resources/package.in.bat"
-	"${PROJECT_SOURCE_DIR}/#Resources/package.bat"
-)
-configure_file(
-	"${PROJECT_SOURCE_DIR}/#Resources/Installer.in.iss"
-	"${PROJECT_SOURCE_DIR}/#Resources/Installer.iss"
-)
+#configure_file(
+#	"${PROJECT_SOURCE_DIR}/#Resources/package.in.bat"
+#	"${PROJECT_SOURCE_DIR}/#Resources/package.bat"
+#)
+#configure_file(
+#	"${PROJECT_SOURCE_DIR}/#Resources/Installer.in.iss"
+#	"${PROJECT_SOURCE_DIR}/#Resources/Installer.iss"
+#)
 configure_file(
 	"${PROJECT_SOURCE_DIR}/Include/Version.h.in"
 	"${PROJECT_BINARY_DIR}/Include/Version.h"

@@ -30,6 +30,7 @@ namespace VFW {
 
 		static const char* get_name(void* type_data);
 		static void get_defaults(obs_data_t *settings);
+		static obs_properties_t* get_properties(void *type_data, void *data);
 
 		static void* create(obs_data_t *settings, obs_encoder_t *encoder);
 		Encoder(obs_data_t *settings, obs_encoder_t *encoder);
@@ -40,8 +41,8 @@ namespace VFW {
 		static bool encode(void *data, struct encoder_frame *frame, struct encoder_packet *packet, bool *received_packet);
 		bool encode(struct encoder_frame *frame, struct encoder_packet *packet, bool *received_packet);
 
-		static obs_properties_t* get_properties(void *data);
-		obs_properties_t* get_properties();
+		static bool cb_configure(obs_properties_t *pr, obs_property_t *p, void *data);
+		static bool cb_about(obs_properties_t *pr, obs_property_t *p, void *data);
 
 		static bool update(void *data, obs_data_t *settings);
 		bool update(obs_data_t* settings);
