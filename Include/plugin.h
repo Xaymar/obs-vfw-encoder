@@ -1,6 +1,7 @@
 #pragma once
 #include "libobs/obs-module.h"
 #include <stdint.h>
+#include <inttypes.h>
 
 //////////////////////////////////////////////////////////////////////////
 // Macro Definitions                                                    //

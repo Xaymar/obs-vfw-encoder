@@ -3,6 +3,7 @@
 #include "libobs/obs-encoder.h"
 
 #include <string>
+#include <vector>
 
 // VFW
 #define COMPMAN
@@ -19,8 +20,13 @@ namespace VFW {
 	struct Info {
 		std::string Id;
 		std::string Name;
+		std::string Path;
 		ICINFO icInfo;
+		ICINFO icInfo2;
+		size_t index;
 		obs_encoder_info obsInfo;
+
+		std::string FourCC;
 	};
 	bool Initialize();
 	bool Finalize();
@@ -30,7 +36,7 @@ namespace VFW {
 
 		static const char* get_name(void* type_data);
 		static void get_defaults(obs_data_t *settings);
-		static obs_properties_t* get_properties(void *type_data, void *data);
+		static obs_properties_t* get_properties(void *data);
 
 		static void* create(obs_data_t *settings, obs_encoder_t *encoder);
 		Encoder(obs_data_t *settings, obs_encoder_t *encoder);
@@ -58,6 +64,15 @@ namespace VFW {
 
 
 		private:
+		VFW::Info* myInfo;
+		ICINFO icinfo;
+		HIC hIC;
 
+		std::vector<char> vbiInput, vbiOutput, vbiOutputOld;
+		BITMAPINFO *biInput, *biOutput, *biOutputOld = nullptr;
+		std::vector<char> frameBuffer, oldFrameBuffer;
+
+
+		uint32_t width, height, fpsNum, fpsDen, kfinterval;
 	};
 };
