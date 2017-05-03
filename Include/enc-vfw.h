@@ -4,6 +4,7 @@
 
 #include <string>
 #include <vector>
+#include <fstream>
 
 // VFW
 #define COMPMAN
@@ -26,7 +27,7 @@ namespace VFW {
 		size_t index;
 		obs_encoder_info obsInfo;
 
-		std::string FourCC;
+		std::string FourCC, FourCC2;
 	};
 	bool Initialize();
 	bool Finalize();
@@ -37,6 +38,8 @@ namespace VFW {
 		static const char* get_name(void* type_data);
 		static void get_defaults(obs_data_t *settings);
 		static obs_properties_t* get_properties(void *data);
+		static bool cb_configure(obs_properties_t *pr, obs_property_t *p, void *data);
+		static bool cb_about(obs_properties_t *pr, obs_property_t *p, void *data);
 
 		static void* create(obs_data_t *settings, obs_encoder_t *encoder);
 		Encoder(obs_data_t *settings, obs_encoder_t *encoder);
@@ -46,9 +49,6 @@ namespace VFW {
 
 		static bool encode(void *data, struct encoder_frame *frame, struct encoder_packet *packet, bool *received_packet);
 		bool encode(struct encoder_frame *frame, struct encoder_packet *packet, bool *received_packet);
-
-		static bool cb_configure(obs_properties_t *pr, obs_property_t *p, void *data);
-		static bool cb_about(obs_properties_t *pr, obs_property_t *p, void *data);
 
 		static bool update(void *data, obs_data_t *settings);
 		bool update(obs_data_t* settings);
@@ -61,18 +61,15 @@ namespace VFW {
 
 		static void get_video_info(void *data, struct video_scale_info *info);
 		void get_video_info(struct video_scale_info *info);
-
-
+		
 		private:
 		VFW::Info* myInfo;
-		ICINFO icinfo;
 		HIC hIC;
-
-		std::vector<char> vbiInput, vbiOutput, vbiOutputOld;
-		BITMAPINFO *biInput, *biOutput, *biOutputOld = nullptr;
-		std::vector<char> frameBuffer, oldFrameBuffer;
-
-
-		uint32_t width, height, fpsNum, fpsDen, kfinterval;
+		std::vector<char> vbiInput, vbiOutput;
+		BITMAPINFO *biInput, *biOutput;
+		std::vector<char> inBuffer, outBuffer;
+		COMPVARS cv;
+		uint32_t width, height, fpsNum, fpsDen;
+		uint32_t userKeyframeInterval, userBitrate, userQuality;
 	};
 };

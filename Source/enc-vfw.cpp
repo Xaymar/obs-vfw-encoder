@@ -9,6 +9,40 @@ std::map<std::string, VFW::Info*> _IdToInfo;
 
 #define snprintf sprintf_s
 
+std::vector<std::pair<const char*, const char*>> codecCorrections = {
+	// Cinepak Codec
+	{ "cvid", "cinepak" }, //AV_CODEC_ID_CINEPAK
+
+
+	// Intel IYUV Encoder
+	{ "iyuv", "h263i" }, // Potentially Intel h263p or h263i?
+	{ "i420", "h263p" },
+
+	// Microsoft
+	{ "mrle", "msrle" }, //AV_CODEC_ID_MSRLE
+	{ "msvc", "msvideo1" }, //AV_CODEC_ID_MSVIDEO1
+
+	// x264vfw
+	{ "x264", "h264" },
+
+	// Matrox
+	{ "mjpg", "mjpeg" }, // Matrox M-JPEG (playback only)
+	//{ "M101", "" }, // Matrox Uncompressed SD
+	//{ "M102", "" }, // Matrox Uncompressed HD
+	{ "m103", "ayuv" }, // Matrox Uncompressed SD + Alpha
+	{ "m104", "ayuv" }, // Matrox Uncompressed HD + Alpha
+	{ "m701", "mpeg2video" }, // Matrox MPEG-2 I-frame HD
+	{ "m702", "mpeg2video" }, // Matrox Offline HD
+	{ "m703", "mpeg2video" }, // Matrox HDV (playback only)
+	{ "m704", "mpeg2video" }, // Matrox MPEG-2 I-frame + Alpha
+	{ "m705", "mpeg2video" }, // Matrox MPEG-2 I-frame HD + Alpha 
+	{ "dvh1", "dvvideo" }, // Matrox DVCPRO HD
+	{ "dvsd", "dvvideo" }, // Matrox DV/DVCAM
+	{ "dv25", "dvvideo" }, // Matrox DVCPRO
+	{ "dv50", "dvvideo" }, // Matrox DVCPRO50 
+	{ "mmes", "mpeg2video" }, // Matrox MPEG-2 I-frame
+};
+
 std::string FourCCFromInt32(DWORD& fccHandler) {
 	return std::string(reinterpret_cast<char*>(&fccHandler), 4);
 }
@@ -57,46 +91,59 @@ bool VFW::Initialize() {
 
 	DWORD fccType = 0;
 	for (size_t i = 0; ICInfo(fccType, i, &icinfo); i++) {
-		HIC hIC = ICOpen(icinfo.fccType, icinfo.fccHandler, ICMODE_FASTCOMPRESS);
+		HIC hIC = ICOpen(icinfo.fccType, icinfo.fccHandler, ICMODE_QUERY);
 		if (hIC) {
 			ICINFO icinfo2;
 			if (ICGetInfo(hIC, &icinfo2, sizeof(icinfo2))) {
-				std::vector<char> idBuf(64);
-				snprintf(idBuf.data(), idBuf.size(), "%ls", icinfo2.szName);
-				std::vector<char> nameBuf(1024);
-				snprintf(nameBuf.data(), nameBuf.size(), "%ls (" PLUGIN_NAME ")", icinfo2.szDescription);
-				std::vector<char> pathBuf(1024);
-				snprintf(pathBuf.data(), pathBuf.size(), "%ls (" PLUGIN_NAME ")", icinfo2.szDriver);
-
 				// Track
 				VFW::Info* info = new VFW::Info();
-				info->Id = std::string(idBuf.data());
-				info->Name = std::string(nameBuf.data());
-				info->Path = std::string(pathBuf.data());
 				std::memcpy(&info->icInfo, &icinfo, sizeof(ICINFO));
 				std::memcpy(&info->icInfo2, &icinfo2, sizeof(ICINFO));
+				info->FourCC = FourCCFromInt32(info->icInfo.fccHandler);
+				info->FourCC2 = FourCCFromInt32(info->icInfo2.fccHandler);
 				info->index = i;
-				info->FourCC = FourCCFromInt32(info->icInfo2.fccHandler);
 
+				std::vector<char> idBuf(64);
+				snprintf(idBuf.data(), idBuf.size(), "%.16ls", icinfo2.szName);
+				info->Id = std::string(idBuf.data()) + "-" + info->FourCC;
+
+				std::vector<char> nameBuf(1024);
+				snprintf(nameBuf.data(), nameBuf.size(), "%.128ls [%s] (" PLUGIN_NAME ")", icinfo2.szDescription, info->FourCC.c_str());
+				info->Name = std::string(nameBuf.data());
+
+				std::vector<char> pathBuf(512);
+				snprintf(pathBuf.data(), pathBuf.size(), "%.128ls", icinfo2.szDriver);
+				info->Path = std::string(pathBuf.data());
+				
 				// Register
 				std::memset(&info->obsInfo, 0, sizeof(obs_encoder_info));
 				info->obsInfo.id = info->Id.data();
 				info->obsInfo.type = OBS_ENCODER_VIDEO;
 				info->obsInfo.codec = info->FourCC.c_str();
+				for (auto& kv : codecCorrections) {
+					if (kv.first == info->FourCC) {
+						info->obsInfo.codec = kv.second;
+					}
+				}
 				info->obsInfo.type_data = info; // circular reference but whatever, it's not reference counted
 				info->obsInfo.get_name = VFW::Encoder::get_name;
 				info->obsInfo.create = VFW::Encoder::create;
 				info->obsInfo.destroy = VFW::Encoder::destroy;
 				info->obsInfo.encode = VFW::Encoder::encode;
+				info->obsInfo.get_defaults = VFW::Encoder::get_defaults;
 				info->obsInfo.get_properties = VFW::Encoder::get_properties;
 				info->obsInfo.update = VFW::Encoder::update;
-				info->obsInfo.get_extra_data = VFW::Encoder::get_extra_data;
-				info->obsInfo.get_sei_data = VFW::Encoder::get_sei_data;
+				//info->obsInfo.get_extra_data = VFW::Encoder::get_extra_data;
+				//info->obsInfo.get_sei_data = VFW::Encoder::get_sei_data;
 				info->obsInfo.get_video_info = VFW::Encoder::get_video_info;
 
-				PLOG_INFO("Registering: %s %s",
+				PLOG_INFO("Registering '%-145s' (Id: %-64s, FourCC1: %s, FourCC2: %s, Codec: %s, Driver: '%-128s')",
+					info->Name.c_str(),
 					info->Id.c_str(),
-					info->Name.c_str());
+					info->FourCC.c_str(),
+					info->FourCC2.c_str(),
+					info->obsInfo.codec,
+					info->Path.c_str());
 
 				obs_register_encoder(&info->obsInfo);
 				_IdToInfo.insert(std::make_pair(info->Id, info));
@@ -122,6 +169,46 @@ void VFW::Encoder::get_defaults(obs_data_t *settings) {
 	obs_data_set_default_double(settings, PROP_KEYFRAME_INTERVAL, 2.0);
 }
 
+obs_properties_t* VFW::Encoder::get_properties(void *data) {
+	VFW::Info* info = static_cast<VFW::Info*>(data);
+	
+	obs_properties_t* pr = obs_properties_create();
+	obs_properties_set_param(pr, data, nullptr);
+	obs_property_t* p;
+
+	p = obs_properties_add_int(pr, PROP_BITRATE, "Bitrate", 1, 1000000, 1);
+	p = obs_properties_add_float_slider(pr, PROP_QUALITY, "Quality", 1, 100, 0.01);
+	p = obs_properties_add_float(pr, PROP_KEYFRAME_INTERVAL, "Keyframe Interval", 0.5, 30.00, 0.1);
+	p = obs_properties_add_button(pr, PROP_CONFIGURE, "Configure", cb_configure);
+	p = obs_properties_add_button(pr, PROP_ABOUT, "About", cb_about);
+
+	return pr;
+}
+
+bool VFW::Encoder::cb_configure(obs_properties_t *pr, obs_property_t *p, void *data) {
+	UNREFERENCED_PARAMETER(pr);
+	UNREFERENCED_PARAMETER(p);
+	UNREFERENCED_PARAMETER(data);
+
+	VFW::Info* info = static_cast<VFW::Info*>(obs_properties_get_param(pr));
+
+	HIC hIC = ICOpen(info->icInfo.fccType, info->icInfo.fccHandler, ICMODE_FASTCOMPRESS);
+	ICConfigure(hIC, GetDesktopWindow());
+	ICClose(hIC);
+
+	return false;
+}
+
+bool VFW::Encoder::cb_about(obs_properties_t *pr, obs_property_t *p, void *data) {
+	UNREFERENCED_PARAMETER(pr);
+	UNREFERENCED_PARAMETER(p);
+	UNREFERENCED_PARAMETER(data);
+
+	VFW::Info* info = static_cast<VFW::Info*>(obs_properties_get_param(pr));
+
+	return false;
+}
+
 void* VFW::Encoder::create(obs_data_t *settings, obs_encoder_t *encoder) {
 	try {
 		return new VFW::Encoder(settings, encoder);
@@ -140,14 +227,14 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 	// Generic information.
 	video_t* obsVideo = obs_encoder_video(encoder);
 	const struct video_output_info *voi = video_output_get_info(obsVideo);
-	fpsNum = voi->fps_num;	fpsDen = voi->fps_den;
-	kfinterval = uint32_t(double_t(fpsDen) / double_t(fpsNum) * obs_data_get_double(settings, PROP_KEYFRAME_INTERVAL));
 	width = obs_encoder_get_width(encoder);	height = obs_encoder_get_height(encoder);
+	fpsNum = voi->fps_num;	fpsDen = voi->fps_den;
+	double_t factor = double_t(fpsNum) / double_t(fpsDen);
+	userKeyframeInterval = max(uint32_t(factor * obs_data_get_double(settings, PROP_KEYFRAME_INTERVAL)), 1);
+	userBitrate = obs_data_get_int(settings, PROP_BITRATE);
+	userQuality = uint32_t(obs_data_get_double(settings, PROP_QUALITY) * 100);
 
-	PLOG_DEBUG("Initializing at %" PRIu32 "x%" PRIu32 " with %" PRIu32 "/%" PRIu32 " FPS.",
-		width, height, fpsNum, fpsDen);
-
-	hIC = ICOpen(myInfo->icInfo.fccType, myInfo->icInfo.fccHandler, ICMODE_FASTCOMPRESS);
+	hIC = ICOpen(myInfo->icInfo.fccType, myInfo->icInfo.fccHandler, ICMODE_FASTCOMPRESS | ICMODE_COMPRESS);
 	if (!hIC) {
 		PLOG_ERROR("Failed to create '%s' VFW encoder.",
 			myInfo->Name.c_str());
@@ -157,18 +244,26 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 			myInfo->Name.c_str());
 	}
 
-	#pragma region Get Bitmap Information
+	PLOG_DEBUG("Initializing at %" PRIu32 "x%" PRIu32 " with %" PRIu32 "/%" PRIu32 " FPS",
+		width, height, fpsNum, fpsDen);
+	PLOG_DEBUG("Using Bitrate %" PRIu32 " kbit, Quality %" PRIu32 ".%02" PRIu32 "%%, Keyframe Interval %" PRIu32,
+		userBitrate,
+		userQuality / 100, userQuality % 100,
+		userKeyframeInterval);
+
+#pragma region Get Bitmap Information
 	vbiInput.resize(sizeof(BITMAPINFO));
+	std::memset(vbiInput.data(), 0, vbiInput.size());
 	biInput = reinterpret_cast<BITMAPINFO*>(vbiInput.data());
-	biInput->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	biInput->bmiHeader.biSize = vbiInput.size();
 	biInput->bmiHeader.biWidth = width;
 	biInput->bmiHeader.biHeight = height;
 	biInput->bmiHeader.biPlanes = 1;
-	biInput->bmiHeader.biBitCount = 32;
+	biInput->bmiHeader.biBitCount = 24;
 	biInput->bmiHeader.biCompression = BI_RGB;
-	biInput->bmiHeader.biSizeImage = width * height * 4;
-	biInput->bmiHeader.biXPelsPerMeter = 1;
-	biInput->bmiHeader.biYPelsPerMeter = 1;
+	biInput->bmiHeader.biSizeImage = 0;
+	biInput->bmiHeader.biXPelsPerMeter = 0;
+	biInput->bmiHeader.biYPelsPerMeter = 0;
 	biInput->bmiHeader.biClrUsed = 0;
 	biInput->bmiHeader.biClrImportant = 0;
 
@@ -180,32 +275,35 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 	}
 
 	vbiOutput.resize(err);
+	std::memset(vbiOutput.data(), 0, vbiOutput.size());
 	biOutput = reinterpret_cast<BITMAPINFO*>(vbiOutput.data());
-	biOutput->bmiHeader.biSize = err;
+	biOutput->bmiHeader.biSize = vbiOutput.size();
 	err = ICSendMessage(hIC, ICM_COMPRESS_GET_FORMAT, reinterpret_cast<DWORD_PTR>(biInput), reinterpret_cast<DWORD_PTR>(biOutput));
 	if (err != ICERR_OK) {
 		PLOG_ERROR("Unable to retrieve format information: %s.",
 			FormattedICCError(err).c_str());
 		throw std::exception();
 	}
-	#pragma endregion Get Bitmap Information
+#pragma endregion Get Bitmap Information
 
-	err = ICSendMessage(hIC, ICM_COMPRESS_GET_SIZE, reinterpret_cast<DWORD_PTR>(biInput), reinterpret_cast<DWORD_PTR>(biOutput));
-	if (err <= 0) {
-		PLOG_ERROR("Unable to retrieve expected buffer size: %s.",
-			FormattedICCError(err).c_str());
+	std::memset(&cv, 0, sizeof(COMPVARS));
+	cv.cbSize = sizeof(COMPVARS);
+	cv.dwFlags = ICMF_COMPVARS_VALID;
+	cv.hic = hIC;
+	cv.fccType = myInfo->icInfo2.fccType;
+	cv.fccHandler = myInfo->icInfo2.fccHandler;
+	cv.lpbiOut = biOutput;
+	cv.lKey = userKeyframeInterval;
+	cv.lDataRate = userBitrate;
+	cv.lQ = userQuality;
+
+	if (!ICSeqCompressFrameStart(&cv, biInput)) {
+		PLOG_ERROR("Unable to begin encoding.");
 		throw std::exception();
 	}
 
-	frameBuffer.resize(err);
-	oldFrameBuffer.resize(err);
-
-	err = ICCompressBegin(hIC, &biInput, &biOutput);
-	if (err != ICERR_OK) {
-		PLOG_ERROR("Unable to begin encoding: %s.",
-			FormattedICCError(err).c_str());
-		throw std::exception();
-	}
+	inBuffer.resize(width * height * 4);
+	outBuffer.resize(width * height * 4);
 }
 
 void VFW::Encoder::destroy(void* data) {
@@ -213,7 +311,7 @@ void VFW::Encoder::destroy(void* data) {
 }
 
 VFW::Encoder::~Encoder() {
-	ICCompressEnd(hIC);
+	ICSeqCompressFrameEnd(&cv);
 	ICClose(hIC);
 }
 
@@ -222,65 +320,38 @@ bool VFW::Encoder::encode(void *data, struct encoder_frame *frame, struct encode
 }
 
 bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *packet, bool *received_packet) {
-	bool keyframe = (frame->pts % kfinterval) == 0;
-	LRESULT err = ICCompress(hIC,
-		keyframe ? ICCOMPRESS_KEYFRAME : 0,
-		&(biOutput->bmiHeader),
-		reinterpret_cast<LPVOID>(frameBuffer.data()),
-		&(biInput->bmiHeader),
-		frame->data[0],
-		0,
-		0,
-		frame->pts,
-		frameBuffer.size(),
-		1000,
-		&(biOutputOld != nullptr ? biOutputOld->bmiHeader : biOutput->bmiHeader),
-		keyframe ? NULL : reinterpret_cast<LPVOID>(oldFrameBuffer.data())
-	);
-	if (err == ICERR_OK) {
-		// Store old information.
-		std::memcpy(oldFrameBuffer.data(), frameBuffer.data(), oldFrameBuffer.size());
+	DWORD dwCkID, cwCompFlags;
 
+	// Vertically invert Image for some reason.
+	const size_t ysize = height;
+	for (size_t y = 0; y < height; y++) {
+		uint8_t offset = frame->linesize[0] * y;
+		uint8_t target = width * 4 * (ysize - y - 1);
+
+		uint8_t* in = reinterpret_cast<uint8_t*>(frame->data[0]) + (frame->linesize[0] * y);
+		uint8_t* out = reinterpret_cast<uint8_t*>(inBuffer.data()) + (width * 4 * (ysize - y - 1));
+		std::memcpy(out, in, width * 4);
+	}
+
+	BOOL keyframe; LONG plSize = outBuffer.size();
+	LPVOID fptr = ICSeqCompressFrame(
+		&cv,
+		0,
+		reinterpret_cast<LPVOID>(inBuffer.data()),
+		&keyframe,
+		&plSize);
+	if (fptr != NULL) {
 		*received_packet = true;
 		packet->keyframe = keyframe;
 		packet->dts = packet->pts = frame->pts;
-		packet->size = oldFrameBuffer.size();
-		packet->data = reinterpret_cast<uint8_t*>(oldFrameBuffer.data());
+		packet->size = plSize;
+		packet->data = reinterpret_cast<uint8_t*>(fptr);
+		packet->type = OBS_ENCODER_VIDEO;
 		return true;
 	} else {
-		PLOG_ERROR("Unable to encode: %s.",
-			FormattedICCError(err).c_str());
+		PLOG_ERROR("Unable to encode.");
 		return false;
 	}
-}
-
-obs_properties_t* VFW::Encoder::get_properties(void *data) {
-	VFW::Info* info = static_cast<VFW::Info*>(data);
-
-	obs_properties_t* pr = obs_properties_create();
-	obs_properties_set_param(pr, data, nullptr);
-	obs_property_t* p;
-
-	p = obs_properties_add_int(pr, PROP_BITRATE, "Bitrate", 1, 1000000, 1);
-	p = obs_properties_add_float(pr, PROP_QUALITY, "Quality", 1, 100, 0.01);
-	p = obs_properties_add_float(pr, PROP_KEYFRAME_INTERVAL, "Keyframe Interval", 0.01, 30.00, 0.01);
-	p = obs_properties_add_button(pr, PROP_CONFIGURE, "Configure", cb_configure);
-	p = obs_properties_add_button(pr, PROP_ABOUT, "About", cb_about);
-
-	return pr;
-}
-
-bool VFW::Encoder::cb_configure(obs_properties_t *pr, obs_property_t *p, void *data) {
-	VFW::Info* info = static_cast<VFW::Info*>(obs_properties_get_param(pr));
-
-	return false;
-}
-
-bool VFW::Encoder::cb_about(obs_properties_t *pr, obs_property_t *p, void *data) {
-	VFW::Info* info = static_cast<VFW::Info*>(obs_properties_get_param(pr));
-
-
-	return false;
 }
 
 bool VFW::Encoder::update(void *data, obs_data_t *settings) {
@@ -288,6 +359,7 @@ bool VFW::Encoder::update(void *data, obs_data_t *settings) {
 }
 
 bool VFW::Encoder::update(obs_data_t* settings) {
+	UNREFERENCED_PARAMETER(settings);
 	return false;
 }
 
@@ -296,6 +368,8 @@ bool VFW::Encoder::get_extra_data(void *data, uint8_t **extra_data, size_t *size
 }
 
 bool VFW::Encoder::get_extra_data(uint8_t** extra_data, size_t* size) {
+	UNREFERENCED_PARAMETER(extra_data);
+	UNREFERENCED_PARAMETER(size);
 	return false;
 }
 
@@ -304,6 +378,8 @@ bool VFW::Encoder::get_sei_data(void *data, uint8_t **sei_data, size_t *size) {
 }
 
 bool VFW::Encoder::get_sei_data(uint8_t** sei_data, size_t* size) {
+	UNREFERENCED_PARAMETER(sei_data);
+	UNREFERENCED_PARAMETER(size);
 	return false;
 }
 
