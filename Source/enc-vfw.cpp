@@ -13,7 +13,6 @@ std::vector<std::pair<const char*, const char*>> codecCorrections = {
 	// Cinepak Codec
 	{ "cvid", "cinepak" }, //AV_CODEC_ID_CINEPAK
 
-
 	// Intel IYUV Encoder
 	{ "iyuv", "h263i" }, // Potentially Intel h263p or h263i?
 	{ "i420", "h263p" },
@@ -31,16 +30,16 @@ std::vector<std::pair<const char*, const char*>> codecCorrections = {
 	//{ "M102", "" }, // Matrox Uncompressed HD
 	{ "m103", "ayuv" }, // Matrox Uncompressed SD + Alpha
 	{ "m104", "ayuv" }, // Matrox Uncompressed HD + Alpha
-	{ "m701", "mpeg2video" }, // Matrox MPEG-2 I-frame HD
 	{ "m702", "mpeg2video" }, // Matrox Offline HD
 	{ "m703", "mpeg2video" }, // Matrox HDV (playback only)
+	{ "mmes", "mpeg2video" }, // Matrox MPEG-2 I-frame
 	{ "m704", "mpeg2video" }, // Matrox MPEG-2 I-frame + Alpha
+	{ "m701", "mpeg2video" }, // Matrox MPEG-2 I-frame HD
 	{ "m705", "mpeg2video" }, // Matrox MPEG-2 I-frame HD + Alpha 
 	{ "dvh1", "dvvideo" }, // Matrox DVCPRO HD
 	{ "dvsd", "dvvideo" }, // Matrox DV/DVCAM
 	{ "dv25", "dvvideo" }, // Matrox DVCPRO
-	{ "dv50", "dvvideo" }, // Matrox DVCPRO50 
-	{ "mmes", "mpeg2video" }, // Matrox MPEG-2 I-frame
+	{ "dv50", "dvvideo" }, // Matrox DVCPRO50
 };
 
 std::string FourCCFromInt32(DWORD& fccHandler) {
@@ -137,7 +136,7 @@ bool VFW::Initialize() {
 				//info->obsInfo.get_sei_data = VFW::Encoder::get_sei_data;
 				info->obsInfo.get_video_info = VFW::Encoder::get_video_info;
 
-				PLOG_INFO("Registering '%-145s' (Id: %-64s, FourCC1: %s, FourCC2: %s, Codec: %s, Driver: '%-128s')",
+				PLOG_INFO("Registering '%s' (Id: %s, FourCC1: %s, FourCC2: %s, Codec: %s, Driver: '%s')",
 					info->Name.c_str(),
 					info->Id.c_str(),
 					info->FourCC.c_str(),
@@ -178,7 +177,7 @@ obs_properties_t* VFW::Encoder::get_properties(void *data) {
 
 	p = obs_properties_add_int(pr, PROP_BITRATE, "Bitrate", 1, 1000000, 1);
 	p = obs_properties_add_float_slider(pr, PROP_QUALITY, "Quality", 1, 100, 0.01);
-	p = obs_properties_add_float(pr, PROP_KEYFRAME_INTERVAL, "Keyframe Interval", 0.5, 30.00, 0.1);
+	p = obs_properties_add_float(pr, PROP_KEYFRAME_INTERVAL, "Keyframe Interval", 0.1, 30.00, 0.1);
 	p = obs_properties_add_button(pr, PROP_CONFIGURE, "Configure", cb_configure);
 	p = obs_properties_add_button(pr, PROP_ABOUT, "About", cb_about);
 
@@ -234,7 +233,7 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 	userBitrate = obs_data_get_int(settings, PROP_BITRATE);
 	userQuality = uint32_t(obs_data_get_double(settings, PROP_QUALITY) * 100);
 
-	hIC = ICOpen(myInfo->icInfo.fccType, myInfo->icInfo.fccHandler, ICMODE_FASTCOMPRESS | ICMODE_COMPRESS);
+	hIC = ICOpen(myInfo->icInfo.fccType, myInfo->icInfo.fccHandler, ICMODE_FASTCOMPRESS);
 	if (!hIC) {
 		PLOG_ERROR("Failed to create '%s' VFW encoder.",
 			myInfo->Name.c_str());
@@ -252,22 +251,18 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 		userKeyframeInterval);
 
 #pragma region Get Bitmap Information
-	vbiInput.resize(sizeof(BITMAPINFO));
+	vbiInput.resize(sizeof(BITMAPINFOHEADER));
 	std::memset(vbiInput.data(), 0, vbiInput.size());
 	biInput = reinterpret_cast<BITMAPINFO*>(vbiInput.data());
 	biInput->bmiHeader.biSize = vbiInput.size();
 	biInput->bmiHeader.biWidth = width;
 	biInput->bmiHeader.biHeight = height;
 	biInput->bmiHeader.biPlanes = 1;
-	biInput->bmiHeader.biBitCount = 24;
+	biInput->bmiHeader.biBitCount = 32;
 	biInput->bmiHeader.biCompression = BI_RGB;
-	biInput->bmiHeader.biSizeImage = 0;
-	biInput->bmiHeader.biXPelsPerMeter = 0;
-	biInput->bmiHeader.biYPelsPerMeter = 0;
-	biInput->bmiHeader.biClrUsed = 0;
-	biInput->bmiHeader.biClrImportant = 0;
+	biInput->bmiHeader.biSizeImage = width * height * (biInput->bmiHeader.biBitCount / 8) * biInput->bmiHeader.biPlanes;
 
-	err = ICSendMessage(hIC, ICM_COMPRESS_GET_FORMAT, reinterpret_cast<DWORD_PTR>(biInput), NULL);
+	err = ICSendMessage(hIC, ICM_COMPRESS_GET_FORMAT, (DWORD_PTR)biInput, NULL);
 	if (err <= 0) {
 		PLOG_ERROR("Unable to retrieve format information size: %s.",
 			FormattedICCError(err).c_str());
@@ -276,9 +271,9 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 
 	vbiOutput.resize(err);
 	std::memset(vbiOutput.data(), 0, vbiOutput.size());
-	biOutput = reinterpret_cast<BITMAPINFO*>(vbiOutput.data());
+	biOutput = (BITMAPINFO*)vbiOutput.data();
 	biOutput->bmiHeader.biSize = vbiOutput.size();
-	err = ICSendMessage(hIC, ICM_COMPRESS_GET_FORMAT, reinterpret_cast<DWORD_PTR>(biInput), reinterpret_cast<DWORD_PTR>(biOutput));
+	err = ICSendMessage(hIC, ICM_COMPRESS_GET_FORMAT, (DWORD_PTR)biInput, (DWORD_PTR)biOutput);
 	if (err != ICERR_OK) {
 		PLOG_ERROR("Unable to retrieve format information: %s.",
 			FormattedICCError(err).c_str());
