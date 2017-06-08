@@ -36,6 +36,7 @@
 #define PROP_KEYFRAME_INTERVAL	"KeyframeInterval"
 #define PROP_MODE				"Mode"
 #define PROP_MODE_NORMAL		"Mode.Normal"
+#define PROP_MODE_TEMPORAL		"Mode.Temporal"
 #define PROP_MODE_SEQUENTIAL	"Mode.Sequential"
 
 #define PROP_CONFIGURE			"Configure"

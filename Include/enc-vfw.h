@@ -28,6 +28,11 @@ namespace VFW {
 		obs_encoder_info obsInfo;
 
 		std::string FourCC, FourCC2;
+		std::vector<uint8_t> stateInfo;
+
+		int32_t defaultQuality;
+		int32_t defaultKeyframeRate;
+		bool hasConfigure, hasAbout;
 	};
 	bool Initialize();
 	bool Finalize();
@@ -65,11 +70,28 @@ namespace VFW {
 		private:
 		VFW::Info* myInfo;
 		HIC hIC;
-		std::vector<char> vbiInput, vbiOutput;
-		BITMAPINFO *biInput, *biOutput;
-		std::vector<char> inBuffer, outBuffer;
 		COMPVARS cv;
-		uint32_t width, height, fpsNum, fpsDen;
-		uint32_t userKeyframeInterval, userBitrate, userQuality;
+		std::vector<char>
+			m_bufferInput,
+			m_bufferInputBitmapInfo,
+			m_bufferPrevInput,
+			m_bufferPrevInputBitmapInfo,
+			m_bufferOutput,
+			m_bufferOutputBitmapInfo;
+		BITMAPINFO 
+			*m_inputBitmapInfo,
+			*m_prevInputBitmapInfo,
+			*m_outputBitmapInfo;
+
+		uint32_t 
+			m_width, m_height,
+			m_fpsNum, m_fpsDen,
+			m_keyframeInterval,
+			m_bitrate, m_quality;
+		bool 
+			m_useNormalCompress, 
+			m_useTemporalFlag,
+			m_useBitrateFlag,
+			m_useQualityFlag;
 	};
 };
