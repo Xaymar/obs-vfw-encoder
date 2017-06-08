@@ -34,6 +34,9 @@
 #define PROP_BITRATE			"Bitrate"
 #define PROP_QUALITY			"Quality"
 #define PROP_KEYFRAME_INTERVAL	"KeyframeInterval"
+#define PROP_MODE				"Mode"
+#define PROP_MODE_NORMAL		"Mode.Normal"
+#define PROP_MODE_SEQUENTIAL	"Mode.Sequential"
 
 #define PROP_CONFIGURE			"Configure"
 #define PROP_ABOUT				"About"
