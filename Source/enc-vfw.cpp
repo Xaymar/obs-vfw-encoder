@@ -4,6 +4,7 @@
 #include <list>
 #include <vector>
 #include <map>
+#include <sstream>
 #include <emmintrin.h>
 
 std::map<std::string, VFW::Info*> _IdToInfo;
@@ -187,7 +188,13 @@ obs_properties_t* VFW::Encoder::get_properties(void *data) {
 	obs_property_set_visible(p, ((info->icInfo2.dwFlags & VIDCF_CRUNCH) != 0));
 	p = obs_properties_add_float_slider(pr, PROP_QUALITY, "Quality", 1, 100, 0.01);
 	obs_property_set_visible(p, ((info->icInfo2.dwFlags & VIDCF_QUALITY) != 0));
+
+	p = obs_properties_add_list(pr, PROP_INTERVAL_TYPE, "Interval Type", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(p, "Seconds", 0);
+	obs_property_list_add_int(p, "Frames", 1);
+	obs_property_set_modified_callback(p, cb_modified);
 	p = obs_properties_add_float(pr, PROP_KEYFRAME_INTERVAL, "Keyframe Interval", 0.00, 30.00, 0.01);
+	p = obs_properties_add_bool(pr, PROP_FORCE_KEYFRAMES, "Force Keyframes");
 
 	p = obs_properties_add_list(pr, PROP_MODE, "Mode", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_list_add_string(p, "Normal", PROP_MODE_NORMAL);
@@ -248,6 +255,22 @@ bool VFW::Encoder::cb_about(obs_properties_t *pr, obs_property_t *p, void *data)
 	return false;
 }
 
+bool VFW::Encoder::cb_modified(obs_properties_t *pr, obs_property_t *p, obs_data_t *data) {
+	if (strcmp(obs_property_name(p), PROP_INTERVAL_TYPE) == 0) {
+		int64_t v = obs_data_get_int(data, PROP_INTERVAL_TYPE);
+
+		switch (v) {
+			case 0:
+				obs_property_int_set_limits(obs_properties_get(pr, PROP_KEYFRAME_INTERVAL), 0.00, 30.00, 0.01);
+				break;
+			case 1:
+				obs_property_int_set_limits(obs_properties_get(pr, PROP_KEYFRAME_INTERVAL), 0, 300, 1);
+				break;
+		}
+	}
+	return true;
+}
+
 void* VFW::Encoder::create(obs_data_t *settings, obs_encoder_t *encoder) {
 	try {
 		return new VFW::Encoder(settings, encoder);
@@ -269,26 +292,43 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 	m_width = obs_encoder_get_width(encoder);	m_height = obs_encoder_get_height(encoder);
 	m_fpsNum = voi->fps_num;	m_fpsDen = voi->fps_den;
 	double_t factor = double_t(m_fpsNum) / double_t(m_fpsDen);
-	m_keyframeInterval = max(uint32_t(factor * obs_data_get_double(settings, PROP_KEYFRAME_INTERVAL)), 0);
+	switch (obs_data_get_int(settings, PROP_INTERVAL_TYPE)) {
+		case 0:
+			m_keyframeInterval = max(uint32_t(
+				factor * obs_data_get_double(settings, PROP_KEYFRAME_INTERVAL)
+				), 0);
+			break;
+		case 1:
+			m_keyframeInterval = 
+				(uint32_t)obs_data_get_double(settings, PROP_KEYFRAME_INTERVAL);
+			break;
+	}
+	m_forceKeyframes = obs_data_get_bool(settings, PROP_FORCE_KEYFRAMES);
 	m_bitrate = uint32_t(obs_data_get_int(settings, PROP_BITRATE));
 	m_quality = uint32_t(obs_data_get_double(settings, PROP_QUALITY) * 100);
 
+	PLOG_DEBUG("<%s> Initializing... ("
+		"Resolution: %" PRIu32 "x%" PRIu32 ","
+		"Frame Rate: %" PRIu32 "/%" PRIu32 " = %0.1f FPS,"
+		"Bitrate: %" PRIu32 ","
+		"Quality: %0.2f %%,"
+		"Keyframe Interval: %" PRIu32 ","
+		"Mode: %s"
+		")",
+		m_width, m_height,
+		m_fpsNum, m_fpsDen, (double_t)m_fpsNum / (double_t)m_fpsDen,
+		m_bitrate, m_quality, m_keyframeInterval,
+		obs_data_get_string(settings, PROP_MODE));
+
 	hIC = ICOpen(myInfo->icInfo.fccType, myInfo->icInfo.fccHandler, ICMODE_FASTCOMPRESS);
 	if (!hIC) {
-		PLOG_ERROR("Failed to create '%s' VFW encoder.",
+		PLOG_ERROR("<%s> Failed to initialize.",
 			myInfo->Name.c_str());
 		throw std::exception();
 	} else {
-		PLOG_INFO("Created '%s' VFW encoder.",
+		PLOG_DEBUG("<%s> Initialized, setting up.",
 			myInfo->Name.c_str());
 	}
-
-	PLOG_DEBUG("Initializing at %" PRIu32 "x%" PRIu32 " with %" PRIu32 "/%" PRIu32 " FPS",
-		m_width, m_height, m_fpsNum, m_fpsDen);
-	PLOG_DEBUG("Using Bitrate %" PRIu32 " kbit, Quality %" PRIu32 ".%02" PRIu32 "%%, Keyframe Interval %" PRIu32,
-		m_bitrate,
-		m_quality / 100, m_quality % 100,
-		m_keyframeInterval);
 
 	// Store temporary flags
 	m_useBitrateFlag = (myInfo->icInfo2.dwFlags & VIDCF_CRUNCH) != 0;
@@ -354,7 +394,7 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 #pragma endregion Get Bitmap Information
 
 	// Prepare Input Buffers
-	size_t alignedWidth = (m_width / 16) * 16;
+	size_t alignedWidth = (m_width / 16 + 1) * 16;
 	const size_t bufferSize = alignedWidth * m_height * 4;
 	m_bufferInput.resize(bufferSize);
 	m_bufferPrevInput.resize(bufferSize);
@@ -386,7 +426,6 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 			throw std::exception();
 		}
 	}
-
 }
 
 void VFW::Encoder::destroy(void* data) {
@@ -424,11 +463,11 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 		0xB  0xA  0x9  0x8
 		0x7  0x6  0x5  0x4
 		0x3  0x2  0x1  0x0
-	*/
+		*/
 	__m128i swizzle = _mm_set_epi8(
-		0xF, 0xC, 0xD, 0xE, 
-		0xB, 0x8, 0x9, 0xA, 
-		0x7, 0x4, 0x5, 0x6, 
+		0xF, 0xC, 0xD, 0xE,
+		0xB, 0x8, 0x9, 0xA,
+		0x7, 0x4, 0x5, 0x6,
 		0x3, 0x0, 0x1, 0x2);
 
 	const size_t lineSize = m_width * 4;
@@ -457,12 +496,14 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 	//}
 
 	bool isKeyframe = false;
+	bool makeKeyframe = (m_keyframeInterval > 0) && ((frame->pts % m_keyframeInterval) == 0);
 
 	*received_packet = false;
 	if (m_useNormalCompress) {
 		DWORD dwFlags, cwCompFlags;
-		bool makeKeyframe = (m_keyframeInterval > 0) && ((frame->pts % m_keyframeInterval) == 0);
-
+		
+		PLOG_DEBUG("<%s:Normal> PTS: %" PRIu32 ", Keyframe: %s",
+			myInfo->Name.c_str(), frame->pts, makeKeyframe ? "Yes" : "No");
 		LRESULT err = ICCompress(hIC,
 			makeKeyframe ? ICCOMPRESS_KEYFRAME : 0,
 			&(m_outputBitmapInfo->bmiHeader), m_bufferOutput.data(),
@@ -484,11 +525,17 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 		// Store some information we need right now.
 		packet->size = m_outputBitmapInfo->bmiHeader.biSizeImage;
 		isKeyframe = (cwCompFlags & AVIIF_KEYFRAME) != 0;
+
+		PLOG_DEBUG("<%s:Normal> PTS: %" PRIu32 ", Keyframe: %s, Size: %" PRIu32,
+			myInfo->Name.c_str(), frame->pts, isKeyframe ? "Yes" : "No", packet->size);
 	} else {
 		BOOL keyframe; LONG plSize = (LONG)m_bufferInput.size();
+
+		PLOG_DEBUG("<%s:Sequential> PTS: %" PRIu32 ", Keyframe: %s",
+			myInfo->Name.c_str(), frame->pts, makeKeyframe ? "Yes" : "No");
 		LPVOID fptr = ICSeqCompressFrame(
 			&cv,
-			0,
+			makeKeyframe ? 1 : 0,
 			reinterpret_cast<LPVOID>(m_bufferInput.data()),
 			&keyframe,
 			&plSize);
@@ -496,21 +543,25 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 			PLOG_ERROR("Unable to encode.");
 			return false;
 		}
-
 		if (plSize > m_bufferOutput.size())
 			m_bufferOutput.resize(plSize);
 		std::memcpy(m_bufferOutput.data(), fptr, plSize);
 		packet->size = plSize;
 		isKeyframe = keyframe != 0;
+
+		PLOG_DEBUG("<%s:Sequential> PTS: %" PRIu32 ", Keyframe: %s, Size: %" PRIu32,
+			myInfo->Name.c_str(), frame->pts, isKeyframe ? "Yes" : "No", packet->size);
 		return true;
 	}
 
 	*received_packet = true;
 	packet->type = OBS_ENCODER_VIDEO;
 	packet->data = reinterpret_cast<uint8_t*>(m_bufferOutput.data());
-	packet->keyframe = isKeyframe;
+	packet->keyframe = m_forceKeyframes ? makeKeyframe || isKeyframe : isKeyframe;
 	packet->pts = frame->pts;
 	packet->dts = frame->pts - 2;
+	PLOG_DEBUG("<%s> PTS: %" PRIu32 ", DTS: %" PRIu32 ", Keyframe: %s, Size: %" PRIu32,
+		myInfo->Name.c_str(), packet->pts, packet->dts, packet->keyframe ? "Yes" : "No", packet->size);
 
 	return true;
 }

@@ -33,7 +33,9 @@
 // Properties
 #define PROP_BITRATE			"Bitrate"
 #define PROP_QUALITY			"Quality"
+#define PROP_INTERVAL_TYPE		"IntervalType"
 #define PROP_KEYFRAME_INTERVAL	"KeyframeInterval"
+#define PROP_FORCE_KEYFRAMES	"ForceKeyframes"
 #define PROP_MODE				"Mode"
 #define PROP_MODE_NORMAL		"Mode.Normal"
 #define PROP_MODE_TEMPORAL		"Mode.Temporal"

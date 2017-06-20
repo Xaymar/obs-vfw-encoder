@@ -45,6 +45,7 @@ namespace VFW {
 		static obs_properties_t* get_properties(void *data);
 		static bool cb_configure(obs_properties_t *pr, obs_property_t *p, void *data);
 		static bool cb_about(obs_properties_t *pr, obs_property_t *p, void *data);
+		static bool cb_modified(obs_properties_t *pr, obs_property_t *p, obs_data_t *data);
 
 		static void* create(obs_data_t *settings, obs_encoder_t *encoder);
 		Encoder(obs_data_t *settings, obs_encoder_t *encoder);
@@ -92,6 +93,7 @@ namespace VFW {
 			m_useNormalCompress, 
 			m_useTemporalFlag,
 			m_useBitrateFlag,
-			m_useQualityFlag;
+			m_useQualityFlag,
+			m_forceKeyframes;
 	};
 };
