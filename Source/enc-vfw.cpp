@@ -134,7 +134,7 @@ bool VFW::Initialize() {
 				info->obsInfo.get_defaults = VFW::Encoder::get_defaults;
 				info->obsInfo.get_properties = VFW::Encoder::get_properties;
 				info->obsInfo.update = VFW::Encoder::update;
-				//info->obsInfo.get_extra_data = VFW::Encoder::get_extra_data;
+				info->obsInfo.get_extra_data = VFW::Encoder::get_extra_data;
 				//info->obsInfo.get_sei_data = VFW::Encoder::get_sei_data;
 				info->obsInfo.get_video_info = VFW::Encoder::get_video_info;
 
@@ -307,17 +307,19 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 	m_bitrate = uint32_t(obs_data_get_int(settings, PROP_BITRATE));
 	m_quality = uint32_t(obs_data_get_double(settings, PROP_QUALITY) * 100);
 
-	PLOG_DEBUG("<%s> Initializing... ("
-		"Resolution: %" PRIu32 "x%" PRIu32 ","
-		"Frame Rate: %" PRIu32 "/%" PRIu32 " = %0.1f FPS,"
-		"Bitrate: %" PRIu32 ","
-		"Quality: %0.2f %%,"
-		"Keyframe Interval: %" PRIu32 ","
+	PLOG_INFO("<%s> Initializing... ("
+		"Resolution: %" PRIu32 "x%" PRIu32 ", "
+		"Frame Rate: %" PRIu32 "/%" PRIu32 " = %0.1f FPS, "
+		"Bitrate: %" PRIu32 ", "
+		"Quality: %0.2f%%, "
+		"Keyframe Interval: %" PRIu32 " (%s), "
 		"Mode: %s"
 		")",
+		myInfo->Name.c_str(),
 		m_width, m_height,
 		m_fpsNum, m_fpsDen, (double_t)m_fpsNum / (double_t)m_fpsDen,
-		m_bitrate, m_quality, m_keyframeInterval,
+		m_bitrate, m_quality,
+		m_keyframeInterval, m_forceKeyframes ? "Enforced" : "Standard",
 		obs_data_get_string(settings, PROP_MODE));
 
 	hIC = ICOpen(myInfo->icInfo.fccType, myInfo->icInfo.fccHandler, ICMODE_FASTCOMPRESS);
@@ -426,6 +428,9 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 			throw std::exception();
 		}
 	}
+
+	PLOG_INFO("<%s> Started.",
+		myInfo->Name.c_str());
 }
 
 void VFW::Encoder::destroy(void* data) {
@@ -559,7 +564,7 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 	packet->data = reinterpret_cast<uint8_t*>(m_bufferOutput.data());
 	packet->keyframe = m_forceKeyframes ? makeKeyframe || isKeyframe : isKeyframe;
 	packet->pts = frame->pts;
-	packet->dts = frame->pts - 2;
+	packet->dts = frame->pts;
 	PLOG_DEBUG("<%s> PTS: %" PRIu32 ", DTS: %" PRIu32 ", Keyframe: %s, Size: %" PRIu32,
 		myInfo->Name.c_str(), packet->pts, packet->dts, packet->keyframe ? "Yes" : "No", packet->size);
 
@@ -582,7 +587,9 @@ bool VFW::Encoder::get_extra_data(void *data, uint8_t **extra_data, size_t *size
 bool VFW::Encoder::get_extra_data(uint8_t** extra_data, size_t* size) {
 	UNREFERENCED_PARAMETER(extra_data);
 	UNREFERENCED_PARAMETER(size);
-	return false;
+	extra_data = nullptr;
+	size = 0;
+	return true;
 }
 
 bool VFW::Encoder::get_sei_data(void *data, uint8_t **sei_data, size_t *size) {
