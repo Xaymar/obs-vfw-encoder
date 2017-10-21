@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
 
 // VFW
 #define COMPMAN
@@ -68,6 +72,12 @@ namespace VFW {
 		static void get_video_info(void *data, struct video_scale_info *info);
 		void get_video_info(struct video_scale_info *info);
 		
+		static void threadMain(void *data, int32_t flag);
+		void threadLocal(int32_t flag);
+		void preProcessLocal(std::unique_lock<std::mutex>& ul);
+		void encodeLocal(std::unique_lock<std::mutex>& ul);
+		void postProcessLocal(std::unique_lock<std::mutex>& ul);
+
 		private:
 		VFW::Info* myInfo;
 		HIC hIC;
@@ -88,12 +98,27 @@ namespace VFW {
 			m_width, m_height,
 			m_fpsNum, m_fpsDen,
 			m_keyframeInterval,
-			m_bitrate, m_quality;
-		bool 
-			m_useNormalCompress, 
+			m_bitrate, m_quality,
+			m_latency, m_maxQueueSize;
+		bool
+			m_useNormalCompress,
 			m_useTemporalFlag,
 			m_useBitrateFlag,
 			m_useQualityFlag,
 			m_forceKeyframes;
+
+		struct thread_data {
+			std::thread worker;
+			std::mutex lock;
+			std::condition_variable cv;
+			// Data Vector, Frame, Keyframe
+			std::queue<std::tuple<std::shared_ptr<std::vector<char>>, int64_t, bool>> data;
+		} m_preProcessData,
+			m_encodeData,
+			m_postProcessData;		
+		std::mutex m_finalPacketsLock;
+		std::queue<std::tuple<std::shared_ptr<std::vector<char>>, int64_t, bool>> m_finalPackets;
+		bool m_threadShutdown;
+		std::shared_ptr<std::vector<char>> m_donotuse_datastor;
 	};
 };

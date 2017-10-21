@@ -5,7 +5,7 @@ PROJECT(enc-vfw)
 # Version
 ################################################################################
 SET(enc-vfw_VERSION_MAJOR 0)
-SET(enc-vfw_VERSION_MINOR 1)
+SET(enc-vfw_VERSION_MINOR 2)
 SET(enc-vfw_VERSION_PATCH 0)
 SET(enc-vfw_VERSION_BUILD 0)
 #configure_file(
