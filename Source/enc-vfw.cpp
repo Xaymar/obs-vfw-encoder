@@ -726,16 +726,16 @@ void VFW::Encoder::preProcessLocal(std::unique_lock<std::mutex>& ul) {
 	auto time_invert = std::chrono::duration_cast<std::chrono::nanoseconds>(invert_end - invert_start);
 	auto time_wait = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end - wait_start);
 	auto time_queue = std::chrono::duration_cast<std::chrono::nanoseconds>(queue_end - queue_start);
-	PLOG_INFO("[Thread PrePro] Frame %" PRId64 ": "
-		"Total: %" PRId64 "ns, "
-		"Invert: %" PRId64 "ns, "
-		"Wait: %" PRId64 "ns, "
-		"Queue: %" PRId64 "ns",
-		std::get<1>(kv), 
-		time_total.count(),
-		time_invert.count(),
-		time_wait.count(),
-		time_queue.count());
+	//PLOG_INFO("[Thread PrePro] Frame %" PRId64 ": "
+	//	"Total: %" PRId64 "ns, "
+	//	"Invert: %" PRId64 "ns, "
+	//	"Wait: %" PRId64 "ns, "
+	//	"Queue: %" PRId64 "ns",
+	//	std::get<1>(kv), 
+	//	time_total.count(),
+	//	time_invert.count(),
+	//	time_wait.count(),
+	//	time_queue.count());
 }
 
 void VFW::Encoder::encodeLocal(std::unique_lock<std::mutex>& ul) {
@@ -830,16 +830,16 @@ void VFW::Encoder::encodeLocal(std::unique_lock<std::mutex>& ul) {
 	auto time_encode = std::chrono::duration_cast<std::chrono::nanoseconds>(encode_end - encode_start);
 	auto time_wait = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end - wait_start);
 	auto time_queue = std::chrono::duration_cast<std::chrono::nanoseconds>(queue_end - queue_start);
-	PLOG_INFO("[Thread Encode] Frame %" PRId64 ": "
-		"Total: %" PRId64 "ns, "
-		"Encode: %" PRId64 "ns, "
-		"Wait: %" PRId64 "ns, "
-		"Queue: %" PRId64 "ns",
-		std::get<1>(kv), 
-		time_total.count(),
-		time_encode.count(),
-		time_wait.count(),
-		time_queue.count());
+	//PLOG_INFO("[Thread Encode] Frame %" PRId64 ": "
+	//	"Total: %" PRId64 "ns, "
+	//	"Encode: %" PRId64 "ns, "
+	//	"Wait: %" PRId64 "ns, "
+	//	"Queue: %" PRId64 "ns",
+	//	std::get<1>(kv), 
+	//	time_total.count(),
+	//	time_encode.count(),
+	//	time_wait.count(),
+	//	time_queue.count());
 }
 
 void MatroxM2VBitstreamFixer(std::shared_ptr<std::vector<char>>& ptr, std::pair<uint32_t, uint32_t> framerate) {
