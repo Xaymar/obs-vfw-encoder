@@ -440,7 +440,7 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 		ICSetState(hIC, NULL, 0);
 	}
 
-	#pragma region Get Bitmap Information
+#pragma region Get Bitmap Information
 	m_bufferInputBitmapInfo.resize(sizeof(BITMAPINFOHEADER));
 	std::memset(m_bufferInputBitmapInfo.data(), 0, m_bufferInputBitmapInfo.size());
 	m_inputBitmapInfo = reinterpret_cast<BITMAPINFO*>(m_bufferInputBitmapInfo.data());
@@ -474,7 +474,7 @@ VFW::Encoder::Encoder(obs_data_t *settings, obs_encoder_t *encoder) {
 			FormattedICCError(err).c_str());
 		throw std::exception();
 	}
-	#pragma endregion Get Bitmap Information
+#pragma endregion Get Bitmap Information
 
 	// Prepare Input Buffers
 	size_t alignedWidth = (m_width / 16 + 1) * 16;
@@ -553,20 +553,18 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 	namespace sc = std::chrono;
 	using schrc = std::chrono::high_resolution_clock;
 
-	size_t queueSize = 0;
-	{
-		std::unique_lock<std::mutex> ulock(m_finalPacketsLock);
-		queueSize = m_finalPackets.size();
-	}
-
 	bool submittedFrame = false;
 	long long maxTime = size_t((double_t(m_fpsNum) / double_t(m_fpsDen)) * 1000000000);
-	while (((*received_packet == false && queueSize >= m_latency) || (submittedFrame == false))
+	while (((*received_packet == false) || (submittedFrame == false))
 		&& (sc::nanoseconds((schrc::now() - tbegin)).count() < maxTime)) {
 		// Submit frame to PreProcessor
 		if (!submittedFrame) {
 			std::unique_lock<std::mutex> ulock(m_preProcessData.lock);
-			if (m_preProcessData.data.size() < m_maxQueueSize) {
+			std::unique_lock<std::mutex> elock(m_encodeData.lock);
+			std::unique_lock<std::mutex> plock(m_postProcessData.lock);
+			if ((m_preProcessData.data.size() < m_maxQueueSize)
+				&& (m_encodeData.data.size() < m_maxQueueSize)
+				&& (m_postProcessData.data.size() < m_maxQueueSize)) {
 				m_preProcessData.data.push(std::make_tuple(
 					std::make_shared<std::vector<char>>(frame->data[0], frame->data[0] + (frame->linesize[0] * this->m_height)),
 					frame->pts,
@@ -588,8 +586,10 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 				packet->keyframe = std::get<2>(front);
 				*received_packet = true;
 				m_finalPackets.pop();
+			#ifdef _DEBUG
 				PLOG_DEBUG("<%s> PTS: %" PRIu32 ", DTS: %" PRIu32 ", Keyframe: %s, Size: %" PRIu32,
 					myInfo->Name.c_str(), packet->pts, packet->dts, packet->keyframe ? "Yes" : "No", packet->size);
+			#endif
 			}
 		}
 
@@ -661,7 +661,7 @@ void VFW::Encoder::threadLocal(int32_t flag) {
 		});
 		if (m_threadShutdown)
 			break;
-		
+
 		if (flag == 0) {
 			preProcessLocal(ulock);
 		} else if (flag == 1) {
@@ -673,12 +673,16 @@ void VFW::Encoder::threadLocal(int32_t flag) {
 }
 
 void VFW::Encoder::preProcessLocal(std::unique_lock<std::mutex>& ul) {
+#ifdef _DEBUG
 	auto total_start = std::chrono::high_resolution_clock::now();
+#endif
 
 	auto kv = m_preProcessData.data.front();
 	ul.unlock();
 
+#ifdef _DEBUG
 	auto invert_start = std::chrono::high_resolution_clock::now();
+#endif
 	std::shared_ptr<std::vector<char>> inbuf = std::get<0>(kv);
 	std::shared_ptr<std::vector<char>> outbuf = inbuf;// std::make_shared<std::vector<char>>(inbuf->size());
 
@@ -693,23 +697,31 @@ void VFW::Encoder::preProcessLocal(std::unique_lock<std::mutex>& ul) {
 		std::memcpy(outbuf->data() + front, inbuf->data() + back, lineSize);
 		std::memcpy(outbuf->data() + back, tempBuf.data(), lineSize);
 	}
+#ifdef _DEBUG
 	auto invert_end = std::chrono::high_resolution_clock::now();
+#endif
 
-	auto wait_start = std::chrono::high_resolution_clock::now();
-	// Do not fill queue if it is > latency.
-	size_t queueSize = m_maxQueueSize;
-	while (queueSize >= m_maxQueueSize) {
-		{
-			std::unique_lock<std::mutex> elock(m_encodeData.lock);
-			queueSize = m_encodeData.data.size();
-		}
+//#ifdef _DEBUG
+//	auto wait_start = std::chrono::high_resolution_clock::now();
+//#endif
+//	// Do not fill queue if it is > latency.
+//	size_t queueSize = m_maxQueueSize;
+//	while (queueSize >= m_maxQueueSize) {
+//		{
+//			std::unique_lock<std::mutex> elock(m_encodeData.lock);
+//			queueSize = m_encodeData.data.size();
+//		}
+//
+//		if (queueSize >= m_maxQueueSize)
+//			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+//	}
+//#ifdef _DEBUG
+//	auto wait_end = std::chrono::high_resolution_clock::now();
+//#endif
 
-		if (queueSize >= m_maxQueueSize)
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
-	}
-	auto wait_end = std::chrono::high_resolution_clock::now();
-
+#ifdef _DEBUG
 	auto queue_start = std::chrono::high_resolution_clock::now();
+#endif
 	{
 		std::unique_lock<std::mutex> plock(m_preProcessData.lock);
 		std::unique_lock<std::mutex> elock(m_encodeData.lock);
@@ -717,41 +729,55 @@ void VFW::Encoder::preProcessLocal(std::unique_lock<std::mutex>& ul) {
 		m_encodeData.cv.notify_all();
 		m_preProcessData.data.pop();
 	}
+#ifdef _DEBUG
 	auto queue_end = std::chrono::high_resolution_clock::now();
+#endif
 
 	ul.lock();
+#ifdef _DEBUG
 	auto total_end = std::chrono::high_resolution_clock::now();
+#endif
 
+#ifdef _DEBUG
 	auto time_total = std::chrono::duration_cast<std::chrono::nanoseconds>(total_end - total_start);
 	auto time_invert = std::chrono::duration_cast<std::chrono::nanoseconds>(invert_end - invert_start);
 	auto time_wait = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end - wait_start);
 	auto time_queue = std::chrono::duration_cast<std::chrono::nanoseconds>(queue_end - queue_start);
-	//PLOG_INFO("[Thread PrePro] Frame %" PRId64 ": "
-	//	"Total: %" PRId64 "ns, "
-	//	"Invert: %" PRId64 "ns, "
-	//	"Wait: %" PRId64 "ns, "
-	//	"Queue: %" PRId64 "ns",
-	//	std::get<1>(kv), 
-	//	time_total.count(),
-	//	time_invert.count(),
-	//	time_wait.count(),
-	//	time_queue.count());
+#endif
+#ifdef _DEBUG
+	PLOG_INFO("[Thread PrePro] Frame %" PRId64 ": "
+		"Total: %" PRId64 "ns, "
+		"Invert: %" PRId64 "ns, "
+		"Wait: %" PRId64 "ns, "
+		"Queue: %" PRId64 "ns",
+		std::get<1>(kv),
+		time_total.count(),
+		time_invert.count(),
+		time_wait.count(),
+		time_queue.count());
+#endif
 }
 
 void VFW::Encoder::encodeLocal(std::unique_lock<std::mutex>& ul) {
+#ifdef _DEBUG
 	auto total_start = std::chrono::high_resolution_clock::now();
+#endif
 
 	auto kv = m_encodeData.data.front();
 	ul.unlock();
 
+#ifdef _DEBUG
 	auto encode_start = std::chrono::high_resolution_clock::now();
+#endif
 	bool isKeyframe = false;
 	bool makeKeyframe = (m_keyframeInterval > 0) && ((std::get<1>(kv) % m_keyframeInterval) == 0);
 	std::shared_ptr<std::vector<char>> inbuf = std::get<0>(kv);
 	std::shared_ptr<std::vector<char>> outbuf = std::make_shared<std::vector<char>>(m_bufferOutput.size());
 	if (m_useNormalCompress) {
 		DWORD dwFlags = 0, cwCompFlags = 0;
+	#ifdef _DEBUG
 		PLOG_DEBUG("<%s:Normal> PTS: %" PRIu32 ", Keyframe: %s", myInfo->Name.c_str(), std::get<1>(kv), makeKeyframe ? "Yes" : "No");
+	#endif
 		LRESULT err = ICCompress(hIC,
 			makeKeyframe ? ICCOMPRESS_KEYFRAME : 0,
 			&(m_outputBitmapInfo->bmiHeader), outbuf->data(),
@@ -771,15 +797,19 @@ void VFW::Encoder::encodeLocal(std::unique_lock<std::mutex>& ul) {
 			// Swap Buffers
 			m_bufferPrevInput.swap(m_bufferInput);
 
+		#ifdef _DEBUG
 			PLOG_DEBUG("<%s:Normal> PTS: %" PRIu32 ", Keyframe: %s, Size: %" PRIu32,
 				myInfo->Name.c_str(), std::get<1>(kv), isKeyframe ? "Yes" : "No", outbuf->size());
+		#endif
 		} else {
 			PLOG_ERROR("Unable to encode: %s.", FormattedICCError(err).c_str());
 		}
 	} else {
 		BOOL keyframe; LONG plSize = (LONG)inbuf->size();
+	#ifdef _DEBUG
 		PLOG_DEBUG("<%s:Sequential> PTS: %" PRIu32 ", Keyframe: %s",
 			myInfo->Name.c_str(), std::get<1>(kv), makeKeyframe ? "Yes" : "No");
+	#endif
 		LPVOID fptr = ICSeqCompressFrame(
 			&cv,
 			makeKeyframe ? 1 : 0,
@@ -793,27 +823,37 @@ void VFW::Encoder::encodeLocal(std::unique_lock<std::mutex>& ul) {
 			std::memcpy(outbuf->data(), fptr, outbuf->size());
 			isKeyframe = keyframe != 0;
 
+		#ifdef _DEBUG
 			PLOG_DEBUG("<%s:Sequential> PTS: %" PRIu32 ", Keyframe: %s, Size: %" PRIu32,
 				myInfo->Name.c_str(), std::get<1>(kv), isKeyframe ? "Yes" : "No", outbuf->size());
+		#endif
 		}
 	}
 
 	isKeyframe = m_forceKeyframes ? makeKeyframe || isKeyframe : isKeyframe;
+#ifdef _DEBUG
 	auto encode_end = std::chrono::high_resolution_clock::now();
+#endif
 
-	auto wait_start = std::chrono::high_resolution_clock::now();
-	// Do not fill queue if it is > latency.
-	size_t queueSize = m_maxQueueSize;
-	while (queueSize >= m_maxQueueSize) {
-		{
-			std::unique_lock<std::mutex> elock(m_postProcessData.lock);
-			queueSize = m_postProcessData.data.size();
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
-	}
-	auto wait_end = std::chrono::high_resolution_clock::now();
+//#ifdef _DEBUG
+//	auto wait_start = std::chrono::high_resolution_clock::now();
+//#endif
+//	// Do not fill queue if it is > latency.
+//	size_t queueSize = m_maxQueueSize;
+//	while (queueSize >= m_maxQueueSize) {
+//		{
+//			std::unique_lock<std::mutex> elock(m_postProcessData.lock);
+//			queueSize = m_postProcessData.data.size();
+//		}
+//		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+//	}
+//#ifdef _DEBUG
+//	auto wait_end = std::chrono::high_resolution_clock::now();
+//#endif
 
+#ifdef _DEBUG
 	auto queue_start = std::chrono::high_resolution_clock::now();
+#endif
 	{
 		std::unique_lock<std::mutex> elock(m_encodeData.lock);
 		std::unique_lock<std::mutex> plock(m_postProcessData.lock);
@@ -821,25 +861,31 @@ void VFW::Encoder::encodeLocal(std::unique_lock<std::mutex>& ul) {
 		m_postProcessData.cv.notify_all();
 		m_encodeData.data.pop();
 	}
+#ifdef _DEBUG
 	auto queue_end = std::chrono::high_resolution_clock::now();
+#endif
 
 	ul.lock();
+#ifdef _DEBUG
 	auto total_end = std::chrono::high_resolution_clock::now();
+#endif
 
+#ifdef _DEBUG
 	auto time_total = std::chrono::duration_cast<std::chrono::nanoseconds>(total_end - total_start);
 	auto time_encode = std::chrono::duration_cast<std::chrono::nanoseconds>(encode_end - encode_start);
 	auto time_wait = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end - wait_start);
 	auto time_queue = std::chrono::duration_cast<std::chrono::nanoseconds>(queue_end - queue_start);
-	//PLOG_INFO("[Thread Encode] Frame %" PRId64 ": "
-	//	"Total: %" PRId64 "ns, "
-	//	"Encode: %" PRId64 "ns, "
-	//	"Wait: %" PRId64 "ns, "
-	//	"Queue: %" PRId64 "ns",
-	//	std::get<1>(kv), 
-	//	time_total.count(),
-	//	time_encode.count(),
-	//	time_wait.count(),
-	//	time_queue.count());
+	PLOG_DEBUG("[Thread Encode] Frame %" PRId64 ": "
+		"Total: %" PRId64 "ns, "
+		"Encode: %" PRId64 "ns, "
+		"Wait: %" PRId64 "ns, "
+		"Queue: %" PRId64 "ns",
+		std::get<1>(kv),
+		time_total.count(),
+		time_encode.count(),
+		time_wait.count(),
+		time_queue.count());
+#endif
 }
 
 void MatroxM2VBitstreamFixer(std::shared_ptr<std::vector<char>>& ptr, std::pair<uint32_t, uint32_t> framerate) {
@@ -862,14 +908,14 @@ void MatroxM2VBitstreamFixer(std::shared_ptr<std::vector<char>>& ptr, std::pair<
 			bestMatchDiff = diff;
 		}
 	}
-	#ifdef _DEBUG
+#ifdef _DEBUG
 	PLOG_DEBUG("(MPEG-2 Rewrite) Best Match for Content: %f (Diff: %llu idx: %i, extn: %i, extd: %i)",
 		double_t(bestMatch.first / mpeg2hertz_mult),
 		bestMatchDiff,
 		std::get<0>(bestMatch.second),
 		std::get<1>(bestMatch.second),
 		std::get<2>(bestMatch.second));
-	#endif
+#endif
 
 	std::vector<char>* buffer = ptr.get();
 
@@ -881,73 +927,73 @@ void MatroxM2VBitstreamFixer(std::shared_ptr<std::vector<char>>& ptr, std::pair<
 
 		switch (blockId) {
 			case 0xB3: // Sequence Header
-				{
-					#ifdef _DEBUG
-					PLOG_DEBUG("(MPEG-2 Rewrite) Sequence Header at %" PRIu64, streamPosition);
-					#endif
-					// Rewrite Framerate
-					char b = (*buffer)[streamPosition + 3];
-					char fpsflag = std::get<0>(bestMatch.second);
-					(*buffer)[streamPosition + 3] = (b & 0xF0) + (fpsflag & 0x0F);
-					streamPosition += 8;
-					break;
-				}
+			{
+			#ifdef _DEBUG
+				PLOG_DEBUG("(MPEG-2 Rewrite) Sequence Header at %" PRIu64, streamPosition);
+			#endif
+				// Rewrite Framerate
+				char b = (*buffer)[streamPosition + 3];
+				char fpsflag = std::get<0>(bestMatch.second);
+				(*buffer)[streamPosition + 3] = (b & 0xF0) + (fpsflag & 0x0F);
+				streamPosition += 8;
+				break;
+			}
 			case 0xB5:
-				{
-//					streamPosition += 1;
-					char type = ((*buffer)[streamPosition] & 0xF0) >> 4;
-					switch (type) {
-						case 0b0001:
-							{ // Sequence Extension (Progressive, FPS, ChromaFormat possible)
-								#ifdef _DEBUG
-								PLOG_DEBUG("(MPEG-2 Rewrite) Sequence Extension at %" PRIu64, streamPosition);
-								#endif
-								(*buffer)[streamPosition + 1] |= 1 << 3; // Flag Progressive
-								(*buffer)[streamPosition + 5] = // Rewrite FPS Ext
-									((*buffer)[streamPosition + 5] & 0x80)
-									| ((std::get<1>(bestMatch.second) & 0x3) << 5)
-									| ((std::get<2>(bestMatch.second) & 0x1F));
-								streamPosition += 6;
-								break;
-							}
-						case 0b0010:
-							{
-								#ifdef _DEBUG
-								PLOG_DEBUG("(MPEG-2 Rewrite) Sequence Display Extension at %" PRIu64, streamPosition);
-								#endif
-								if ((*buffer)[streamPosition] & 0b1) {
-									streamPosition += 8;
-								} else {
-									streamPosition += 5;
-								}
-							}
-							break;
-						case 0b1000:
-							{ // Chroma Stuff?
-								#ifdef _DEBUG
-								PLOG_DEBUG("(MPEG-2 Rewrite) Picture Coding Extension at %" PRIu64, streamPosition);
-								#endif
-								// Picture Structure
-								(*buffer)[streamPosition + 2] |= 0x3; // Full Frame
-								(*buffer)[streamPosition + 3] &= ~(1 << 7); // top field first
-								(*buffer)[streamPosition + 3] &= ~(1 << 1); // repeat first field
-								(*buffer)[streamPosition + 4] |= 1 << 7; // progressive
-								if ((*buffer)[streamPosition + 4] & 0b1000000) {
-									streamPosition += 7;
-								} else {
-									streamPosition += 5;
-								}
-								break;
-							}
-							#ifdef _DEBUG
-						default:
-							PLOG_DEBUG("(MPEG-2 Rewrite) Unknown Extension %" PRIx8 " at %" PRIu64, type, streamPosition);
-							break;
-							#endif
+			{
+				//					streamPosition += 1;
+				char type = ((*buffer)[streamPosition] & 0xF0) >> 4;
+				switch (type) {
+					case 0b0001:
+					{ // Sequence Extension (Progressive, FPS, ChromaFormat possible)
+					#ifdef _DEBUG
+						PLOG_DEBUG("(MPEG-2 Rewrite) Sequence Extension at %" PRIu64, streamPosition);
+					#endif
+						(*buffer)[streamPosition + 1] |= 1 << 3; // Flag Progressive
+						(*buffer)[streamPosition + 5] = // Rewrite FPS Ext
+							((*buffer)[streamPosition + 5] & 0x80)
+							| ((std::get<1>(bestMatch.second) & 0x3) << 5)
+							| ((std::get<2>(bestMatch.second) & 0x1F));
+						streamPosition += 6;
+						break;
 					}
-
+					case 0b0010:
+					{
+					#ifdef _DEBUG
+						PLOG_DEBUG("(MPEG-2 Rewrite) Sequence Display Extension at %" PRIu64, streamPosition);
+					#endif
+						if ((*buffer)[streamPosition] & 0b1) {
+							streamPosition += 8;
+						} else {
+							streamPosition += 5;
+						}
+					}
 					break;
+					case 0b1000:
+					{ // Chroma Stuff?
+					#ifdef _DEBUG
+						PLOG_DEBUG("(MPEG-2 Rewrite) Picture Coding Extension at %" PRIu64, streamPosition);
+					#endif
+						// Picture Structure
+						(*buffer)[streamPosition + 2] |= 0x3; // Full Frame
+						(*buffer)[streamPosition + 3] &= ~(1 << 7); // top field first
+						(*buffer)[streamPosition + 3] &= ~(1 << 1); // repeat first field
+						(*buffer)[streamPosition + 4] |= 1 << 7; // progressive
+						if ((*buffer)[streamPosition + 4] & 0b1000000) {
+							streamPosition += 7;
+						} else {
+							streamPosition += 5;
+						}
+						break;
+					}
+				#ifdef _DEBUG
+					default:
+						PLOG_DEBUG("(MPEG-2 Rewrite) Unknown Extension %" PRIx8 " at %" PRIu64, type, streamPosition);
+						break;
+					#endif
 				}
+
+				break;
+			}
 		}
 
 		// Seek to a valid position.
@@ -963,44 +1009,61 @@ void MatroxM2VBitstreamFixer(std::shared_ptr<std::vector<char>>& ptr, std::pair<
 }
 
 void VFW::Encoder::postProcessLocal(std::unique_lock<std::mutex>& ul) {
+#ifdef _DEBUG
 	auto total_start = std::chrono::high_resolution_clock::now();
+#endif
 
 	auto kv = m_postProcessData.data.front();
 	ul.unlock();
 
+#ifdef _DEBUG
 	auto bitstream_start = std::chrono::high_resolution_clock::now();
+#endif
 	if ((myInfo->Id == "mvcVfwMpeg2-mmes")
 		|| (myInfo->Id == "mvcVfwMpeg2Alpha-m704")
 		|| (myInfo->Id == "mvcVfwMpeg2HD-m701")
 		|| (myInfo->Id == "mvcVfwMpeg2Alpha-m705")) {
 		MatroxM2VBitstreamFixer(std::get<0>(kv), std::make_pair(m_fpsNum, m_fpsDen));
 	}
+#ifdef _DEBUG
 	auto bitstream_end = std::chrono::high_resolution_clock::now();
+#endif
 
-	auto wait_start = std::chrono::high_resolution_clock::now();
-	// Do not fill queue if it is > latency.
-	size_t queueSize = m_maxQueueSize;
-	while (queueSize >= m_maxQueueSize) {
-		{
-			std::unique_lock<std::mutex> flock(m_finalPacketsLock);
-			queueSize = m_finalPackets.size();
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
-	}
-	auto wait_end = std::chrono::high_resolution_clock::now();
+//#ifdef _DEBUG
+//	auto wait_start = std::chrono::high_resolution_clock::now();
+//#endif
+//	// Do not fill queue if it is > latency.
+//	size_t queueSize = m_maxQueueSize;
+//	while (queueSize >= m_maxQueueSize) {
+//		{
+//			std::unique_lock<std::mutex> flock(m_finalPacketsLock);
+//			queueSize = m_finalPackets.size();
+//		}
+//		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+//	}
+//#ifdef _DEBUG
+//	auto wait_end = std::chrono::high_resolution_clock::now();
+//#endif
 
+#ifdef _DEBUG
 	auto queue_start = std::chrono::high_resolution_clock::now();
+#endif
 	{
 		std::unique_lock<std::mutex> plock(m_postProcessData.lock);
 		std::unique_lock<std::mutex> flock(m_finalPacketsLock);
 		m_finalPackets.push(kv);
 		m_postProcessData.data.pop();
 	}
+#ifdef _DEBUG
 	auto queue_end = std::chrono::high_resolution_clock::now();
+#endif
 
 	ul.lock();
+#ifdef _DEBUG
 	auto total_end = std::chrono::high_resolution_clock::now();
+#endif
 
+#ifdef _DEBUG
 	auto time_total = std::chrono::duration_cast<std::chrono::nanoseconds>(total_end - total_start);
 	auto time_bitstream = std::chrono::duration_cast<std::chrono::nanoseconds>(bitstream_end - bitstream_start);
 	auto time_wait = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end - wait_start);
@@ -1013,6 +1076,7 @@ void VFW::Encoder::postProcessLocal(std::unique_lock<std::mutex>& ul) {
 		std::get<1>(kv),
 		time_total.count(),
 		time_bitstream.count(),
-		time_wait.count(), 
+		time_wait.count(),
 		time_queue.count());
+#endif
 }
