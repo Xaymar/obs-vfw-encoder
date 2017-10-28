@@ -554,7 +554,7 @@ bool VFW::Encoder::encode(struct encoder_frame *frame, struct encoder_packet *pa
 	using schrc = std::chrono::high_resolution_clock;
 
 	bool submittedFrame = false;
-	long long maxTime = size_t((double_t(m_fpsNum) / double_t(m_fpsDen)) * 1000000000);
+	long long maxTime = size_t((double_t(m_fpsDen) / double_t(m_fpsNum)) * 1000000000ll);
 	while (((*received_packet == false) || (submittedFrame == false))
 		&& (sc::nanoseconds((schrc::now() - tbegin)).count() < maxTime)) {
 		// Submit frame to PreProcessor
